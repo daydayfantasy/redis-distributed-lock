@@ -25,7 +25,9 @@ public class RedisDistributedLock implements DistributedLock {
     public static RedisDistributedLock getInstance() {
         if (redisDistributedLock == null) {
             synchronized (RedisDistributedLock.class) {
-                redisDistributedLock = new RedisDistributedLock();
+                if (redisDistributedLock == null) {
+                    redisDistributedLock = new RedisDistributedLock();
+                }
             }
         }
         return redisDistributedLock;
