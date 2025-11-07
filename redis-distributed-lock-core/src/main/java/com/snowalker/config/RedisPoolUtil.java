@@ -2,6 +2,7 @@ package com.snowalker.config;
 
 import java.util.List;
 import redis.clients.jedis.Jedis;
+import redis.clients.jedis.params.SetParams;
 
 /**
  * @author snowalker
@@ -92,7 +93,18 @@ public class RedisPoolUtil {
         String result = null;
         try {
             jedis = RedisPool.getJedis();
-            result = jedis.set(key, value, nxxx, expx, time);
+            SetParams params = new SetParams();
+            if ("NX".equalsIgnoreCase(nxxx)) {
+                params.nx();
+            } else if ("XX".equalsIgnoreCase(nxxx)) {
+                params.xx();
+            }
+            if ("EX".equalsIgnoreCase(expx)) {
+                params.ex(time);
+            } else if ("PX".equalsIgnoreCase(expx)) {
+                params.px(time);
+            }
+            result = jedis.set(key, value, params);
         } catch (Exception e){
             e.printStackTrace();
         } finally {
