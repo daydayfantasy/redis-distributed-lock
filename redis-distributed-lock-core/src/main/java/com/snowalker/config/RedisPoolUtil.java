@@ -1,5 +1,6 @@
 package com.snowalker.config;
 
+import java.util.List;
 import redis.clients.jedis.Jedis;
 
 /**
@@ -75,6 +76,54 @@ public class RedisPoolUtil {
             }
             return result;
         }
+    }
+
+    /**
+     * 设置带过期时间的键值对，原子操作
+     * @param key 键
+     * @param value 值
+     * @param nxxx NX：只在键不存在时设置，XX：只在键存在时设置
+     * @param expx EX：过期时间单位为秒，PX：过期时间单位为毫秒
+     * @param time 过期时间
+     * @return 设置成功返回OK，否则返回null
+     */
+    public static String set(String key, String value, String nxxx, String expx, long time){
+        Jedis jedis = null;
+        String result = null;
+        try {
+            jedis = RedisPool.getJedis();
+            result = jedis.set(key, value, nxxx, expx, time);
+        } catch (Exception e){
+            e.printStackTrace();
+        } finally {
+            if (jedis != null) {
+                jedis.close();
+            }
+            return result;
+        }
+    }
+
+    /**
+     * 执行Lua脚本
+     * @param script Lua脚本
+     * @param keys 键参数
+     * @param args 值参数
+     * @return 执行结果
+     */
+    public static Object eval(String script, List<String> keys, List<String> args){
+        Jedis jedis = null;
+        Object result = null;
+        try {
+            jedis = RedisPool.getJedis();
+            result = jedis.eval(script, keys, args);
+        } catch (Exception e){
+            e.printStackTrace();
+        } finally {
+            if (jedis != null) {
+                jedis.close();
+            }
+        }
+        return result;
     }
 
     public static Long del(String key){

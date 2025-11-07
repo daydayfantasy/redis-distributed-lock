@@ -5,6 +5,8 @@ import com.snowalker.util.PropertiesUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * @author snowalker
@@ -46,16 +48,16 @@ public class RedisDistributedLock implements DistributedLock {
         log.info("开始获取Redis分布式锁流程,lockName={},CurrentThreadName={}", lockName, Thread.currentThread().getName());
         long lockTimeout = Long.parseLong(PropertiesUtil.getProperty("redis.lock.timeout", "5"));
         /**redis中锁的值为:当前时间+超时时间*/
-        Long lockResult = RedisPoolUtil.setnx(lockName, String.valueOf(System.currentTimeMillis() + lockTimeout));
+        String lockValue = String.valueOf(System.currentTimeMillis() + lockTimeout);
+        // 使用原子操作set(key, value, NX, EX, time)替代setnx+expire
+        String lockResult = RedisPoolUtil.set(lockName, lockValue, "NX", "EX", EXPIRE_SECONDS);
 
-        if (lockResult != null && lockResult.intValue() == 1) {
-            log.info("setNx获取分布式锁[成功],threadName={}", Thread.currentThread().getName());
-            RedisPoolUtil.expire(lockName, EXPIRE_SECONDS);
+        if ("OK".equals(lockResult)) {
+            log.info("原子set获取分布式锁[成功],threadName={}", Thread.currentThread().getName());
             return true;
         } else {
-            log.info("setNx获取分布式锁[失败],threadName={}", Thread.currentThread().getName());
-//            return tryLock(lockName, lockTimeout);
-            return false;
+            log.info("原子set获取分布式锁[失败],threadName={}", Thread.currentThread().getName());
+            return tryLock(lockName, lockTimeout);
         }
     }
 
@@ -66,35 +68,44 @@ public class RedisDistributedLock implements DistributedLock {
          *    setNx结果小于当前时间，表明锁已过期，可以再次尝试加锁
          */
         String lockValueStr = RedisPoolUtil.get(lockName);
-        Long lockValueATime = Long.parseLong(lockValueStr);
-        log.info("lockValueATime为:" + lockValueATime);
-        if (lockValueStr != null && lockValueATime < System.currentTimeMillis()) {
-
-            /**2.2再次用当前时间戳getset--->将给定 key 的值设为 value，并返回 key 的旧值(old value)
-             * 通过getset重设锁对应的值: 新的当前时间+超时时间，并返回旧的锁对应值
-             */
-            String getSetResult = RedisPoolUtil.getSet(lockName, String.valueOf(System.currentTimeMillis() + lockTimeout));
-            log.info("lockValueBTime为:" + Long.parseLong(getSetResult));
-            if (getSetResult == null || (getSetResult != null && StringUtils.equals(lockValueStr, getSetResult))) {
-                /**
-                 *2.3旧值判断，是否可以获取锁
-                 *当key没有旧值时，即key不存在时，返回nil ->获取锁，设置锁过期时间
-                 */
-                log.info("获取Redis分布式锁[成功],lockName={},CurrentThreadName={}",
-                        lockName, Thread.currentThread().getName());
-                RedisPoolUtil.expire(lockName, EXPIRE_SECONDS);
-                return true;
-            } else {
-                log.info("获取锁失败,lockName={},CurrentThreadName={}",
-                        lockName, Thread.currentThread().getName());
-                return false;
+        if (lockValueStr != null) {
+            Long lockValueATime = Long.parseLong(lockValueStr);
+            log.info("lockValueATime为:" + lockValueATime);
+            if (lockValueATime < System.currentTimeMillis()) {
+                // 使用Lua脚本确保getset和expire操作的原子性
+                String luaScript = "local current_value = redis.call('GET', KEYS[1])\n" +
+                        "if current_value == false or tonumber(current_value) < tonumber(ARGV[1]) then\n" +
+                        "    local old_value = redis.call('GETSET', KEYS[1], ARGV[2])\n" +
+                        "    if old_value == false or old_value == current_value then\n" +
+                        "        redis.call('EXPIRE', KEYS[1], ARGV[3])\n" +
+                        "        return 1\n" +
+                        "    end\n" +
+                        "end\n" +
+                        "return 0";
+                
+                List<String> keys = Arrays.asList(lockName);
+                List<String> args = Arrays.asList(String.valueOf(System.currentTimeMillis()), 
+                                                String.valueOf(System.currentTimeMillis() + lockTimeout), 
+                                                String.valueOf(EXPIRE_SECONDS));
+                
+                Object result = RedisPoolUtil.eval(luaScript, keys, args);
+                log.info("Lua脚本执行结果为:" + result);
+                
+                if (result != null && "1".equals(result.toString())) {
+                    log.info("获取Redis分布式锁[成功],lockName={},CurrentThreadName={}",
+                            lockName, Thread.currentThread().getName());
+                    return true;
+                } else {
+                    log.info("获取锁失败,lockName={},CurrentThreadName={}",
+                            lockName, Thread.currentThread().getName());
+                    return false;
+                }
             }
-        } else {
-            /**3.锁未超时，获取锁失败*/
-            log.info("当前锁未失效！！！！，竞争失败，继续持有之前的锁,lockName={},CurrentThreadName={}",
-                    lockName, Thread.currentThread().getName());
-            return false;
         }
+        /**3.锁未超时，获取锁失败*/
+        log.info("当前锁未失效！！！！，竞争失败，继续持有之前的锁,lockName={},CurrentThreadName={}",
+                lockName, Thread.currentThread().getName());
+        return false;
     }
 
     /**
@@ -104,12 +115,26 @@ public class RedisDistributedLock implements DistributedLock {
      */
     @Override
     public boolean release(String lockName) {
-        Long result = RedisPoolUtil.del(lockName);
-        if (result != null && result.intValue() == 1) {
-            log.info("删除Redis分布式锁成功，锁已释放, key= :{}", lockName);
+        // 使用Lua脚本确保检查锁持有者和删除锁的原子性
+        String luaScript = "local current_value = redis.call('GET', KEYS[1])\n" +
+                "if current_value == ARGV[1] then\n" +
+                "    return redis.call('DEL', KEYS[1])\n" +
+                "end\n" +
+                "return 0";
+        
+        // 获取当前线程持有的锁值
+        String lockValue = RedisPoolUtil.get(lockName);
+        if (lockValue == null) {
+            log.info("Redis分布式锁不存在，无需释放, key= :{}", lockName);
             return true;
         }
-        log.info("删除Redis分布式锁失败，锁未释放, key= :{}", lockName);
-        return false;
+        
+        List<String> keys = Arrays.asList(lockName);
+        List<String> args = Arrays.asList(lockValue);
+        
+        Object result = RedisPoolUtil.eval(luaScript, keys, args);
+        log.info("释放Redis分布式锁结果为:{}, key= :{}", result, lockName);
+        
+        return result != null && "1".equals(result.toString());
     }
 }
