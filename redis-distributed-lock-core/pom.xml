@@ -14,15 +14,15 @@
     <url>http://www.example.com</url>
 
     <properties>
-        <aspectjweaver>1.8.10</aspectjweaver>
-        <aspecjrt>1.8.10</aspecjrt>
-        <apache-common-lang3>3.4</apache-common-lang3>
-        <google-guava>20.0</google-guava>
-        <jedis>2.9.0</jedis>
-        <slf4j-api>1.7.25</slf4j-api>
+        <aspectjweaver>1.9.20.1</aspectjweaver>
+        <aspecjrt>1.9.20.1</aspecjrt>
+        <apache-common-lang3>3.13.0</apache-common-lang3>
+        <google-guava>32.1.3-jre</google-guava>
+        <jedis>4.4.3</jedis>
+        <slf4j-api>2.0.9</slf4j-api>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>1.7</maven.compiler.source>
-        <maven.compiler.target>1.7</maven.compiler.target>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
     </properties>
 
     <dependencies>
@@ -86,7 +86,7 @@
         <dependency>
             <groupId>org.redisson</groupId>
             <artifactId>redisson</artifactId>
-            <version>3.5.4</version>
+            <version>3.20.1</version>
         </dependency>
         <dependency>
             <groupId>javax.annotation</groupId>
@@ -111,11 +111,15 @@
                 </plugin>
                 <plugin>
                     <artifactId>maven-compiler-plugin</artifactId>
-                    <version>3.7.0</version>
+                    <version>3.10.1</version>
+                    <configuration>
+                        <source>17</source>
+                        <target>17</target>
+                    </configuration>
                 </plugin>
                 <plugin>
                     <artifactId>maven-surefire-plugin</artifactId>
-                    <version>2.20.1</version>
+                    <version>3.1.2</version>
                 </plugin>
                 <plugin>
                     <artifactId>maven-jar-plugin</artifactId>
